@@ -42,7 +42,18 @@ def project(tmp_path):
 class TestSubdirectoryHintTracker:
     """Unit tests for SubdirectoryHintTracker."""
 
+    def test_constructor_does_not_open_root_hint_file(self, tmp_path, monkeypatch):
+        """Agent startup must not block on a redundant root hint-file read."""
+        (tmp_path / "AGENTS.md").write_text("Root project instructions")
 
+        def fail_if_read(*args, **kwargs):
+            raise AssertionError("constructor performed synchronous hint-file I/O")
+
+        monkeypatch.setattr(Path, "read_text", fail_if_read)
+
+        tracker = SubdirectoryHintTracker(working_dir=str(tmp_path))
+
+        assert tracker.working_dir == tmp_path.resolve()
 
     def test_discovers_claude_md(self, project):
         """Frontend CLAUDE.md should be discovered."""
@@ -229,15 +240,17 @@ class TestContentDeduplication:
         assert first is not None and "Alpha rules" in first
         assert second is not None and "Beta rules" in second
 
-    def test_working_dir_content_seeded(self, tmp_path):
-        """A copy of the CWD's own context file is not re-injected."""
+    def test_working_dir_content_is_not_read_for_digest_seeding(self, tmp_path):
+        """A copied root hint may load later; startup must remain I/O-free."""
         (tmp_path / "AGENTS.md").write_text("Root instructions")
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
         (elsewhere / "AGENTS.md").write_text("Root instructions")
 
         tracker = SubdirectoryHintTracker(working_dir=str(tmp_path))
-        assert tracker.check_tool_call("read_file", {"path": str(elsewhere / "f.py")}) is None
+        result = tracker.check_tool_call("read_file", {"path": str(elsewhere / "f.py")})
+        assert result is not None
+        assert "Root instructions" in result
 
 
 class TestExcludedDirectories:

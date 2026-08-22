@@ -90,29 +90,14 @@ class SubdirectoryHintTracker:
         self._loaded_digests: Set[str] = set()
         # Pre-mark the working dir as loaded (startup context handles it)
         self._loaded_dirs.add(self.working_dir)
-        self._seed_working_dir_digest()
-
-    def _seed_working_dir_digest(self) -> None:
-        """Record the CWD context file's digest so it is never re-injected.
-
-        ``prompt_builder`` already loads the working directory's context file at
-        startup.  Seeding its digest here means the same content reached through
-        a different path (a symlink farm, a shared workspace) is recognised as a
-        duplicate instead of being sent a second time.
-        """
-        for filename in _HINT_FILENAMES:
-            candidate = self.working_dir / filename
-            try:
-                if not candidate.is_file():
-                    continue
-                content = candidate.read_text(encoding="utf-8").strip()
-            except (OSError, UnicodeDecodeError):
-                continue
-            if content:
-                self._loaded_digests.add(
-                    hashlib.sha256(content.encode("utf-8")).hexdigest()
-                )
-            break  # first match wins, mirroring startup loading
+        # Do not synchronously reopen the root context file here. The startup
+        # prompt builder has already loaded it, and this constructor runs on a
+        # gateway worker before the user's message is persisted or sent to the
+        # model. A filesystem-level stall in Path.read_text() would therefore
+        # leave Discord showing "typing" forever. The working directory is
+        # already marked loaded above, so skipping this optional digest seed
+        # only gives up duplicate suppression for the rare case where the same
+        # root file is later reached through a different symlink/hardlink path.
 
     def check_tool_call(
         self,
